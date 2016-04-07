@@ -9,15 +9,13 @@
 #include <Windows.h>
 #include <D3D11.h>
 
-//#include <osvr/Common/ClientInterface.h>
-//#include <osvr/ClientKit/Interface.h>
+#include <osvr/ClientKit/ContextC.h>
 #include <osvr/RenderKit/RenderManager.h>
 #include <osvr/RenderKit/GraphicsLibraryD3D11.h>
 
 
 #pragma optimize("",off)
 
-using namespace osvr::clientkit;
 using namespace osvr::renderkit;
 
 
@@ -93,8 +91,10 @@ template<typename T> void SAFE_RELEASE(T * const p)
 struct AppState
 {
     AppState()
-        : context("com.motionreality.dauntless")
-    {}
+        : context(nullptr)
+    {
+        context = osvrClientInit("com.motionreality.RM_Server");
+    }
 
     ~AppState()
     {
@@ -112,9 +112,15 @@ struct AppState
                 }
             }
         }
+
+        if (context)
+        {
+            osvrClientShutdown(context);
+            context = nullptr;
+        }
     }
 
-    ClientContext context;
+    OSVR_ClientContext context;
     std::unique_ptr<RenderManager> pRenderManager;
     osvr::renderkit::RenderManager::RenderParams renderParams;
     std::vector<osvr::renderkit::RenderInfo> renderInfo;
@@ -137,20 +143,20 @@ void OSVR_Init()
     // Get an OSVR client context to use to access the devices that we need.
     std::unique_ptr<AppState> appState(new AppState());
 
-    appState->context.update();
-    if (!appState->context.checkStatus())
+    osvrClientUpdate(appState->context);
+    if (osvrClientCheckStatus(appState->context) != OSVR_RETURN_SUCCESS)
     {
         std::cerr << "Waiting for client context...\n";
         ::Sleep(500);
-        appState->context.update();
-        if (!appState->context.checkStatus())
+        osvrClientUpdate(appState->context);
+        if (osvrClientCheckStatus(appState->context) != OSVR_RETURN_SUCCESS)
         {
             std::cerr << "OSVR ClientContext failed" << std::endl;
             return;
         }
     }
 
-    appState->pRenderManager.reset(createRenderManager(appState->context.get(), "Direct3D11"));
+    appState->pRenderManager.reset(createRenderManager(appState->context, "Direct3D11"));
     if ((appState->pRenderManager == nullptr) || (!appState->pRenderManager->doingOkay())) {
         std::cerr << "Could not create RenderManager" << std::endl;
         return;

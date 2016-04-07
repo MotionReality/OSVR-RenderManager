@@ -315,6 +315,8 @@ endif()
 set(OSVRRM_INSTALL_EXAMPLES ON)
 add_subdirectory(examples)
 
+add_subdirectory(NetServer)
+
 install(TARGETS
 	osvrRenderManager
 	EXPORT ${PROJECT_NAME}

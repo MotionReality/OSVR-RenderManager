@@ -64,7 +64,8 @@ namespace Messages
     {
         BeginPresent() : MessageBase(eMsgId_BeginPresent) {}
         uint32_t idxBufferSet;
-        //double qx, qy, qz, qw; // Head pose at time of render
+        uint32_t qHeadValid;
+        double qx, qy, qz, qw; // Head pose at time of render        
     };
 
     struct PresentAck : MessageBase

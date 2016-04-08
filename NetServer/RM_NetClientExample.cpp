@@ -439,7 +439,7 @@ int main(int argc, char* argv[]) {
         //myContext->Flush();
 
         // Send the rendered results to the screen
-        if (!RM_NetClient_PresentRenderBuffers(pNetClient.get(), 0)) {
+        if (!RM_NetClient_PresentRenderBuffers(pNetClient.get(), 0, nullptr)) {
             std::cerr << "PresentRenderBuffers() returned false, maybe because "
                          "it was asked to quit"
                       << std::endl;

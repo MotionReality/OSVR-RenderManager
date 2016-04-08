@@ -257,7 +257,7 @@ struct RM_NetClient
         return true;
     }
 
-    bool PresentRenderBuffers(size_t bufferSetIndex)
+    bool PresentRenderBuffers(size_t bufferSetIndex, RM_NetClient_PoseState const * pRenderPose)
     {
         if (!IsConnected())
         {
@@ -267,10 +267,19 @@ struct RM_NetClient
         Messages::BeginPresent msg;
 
         msg.idxBufferSet = bufferSetIndex;
-        //msg.qx = osvrQuatGetX(&m_renderInfo[0].pose.rotation);
-        //msg.qy = osvrQuatGetY(&m_renderInfo[0].pose.rotation);
-        //msg.qz = osvrQuatGetZ(&m_renderInfo[0].pose.rotation);
-        //msg.qw = osvrQuatGetW(&m_renderInfo[0].pose.rotation);
+        if (pRenderPose)
+        {
+            msg.qHeadValid = 1;
+            msg.qw = pRenderPose->rotation.w;
+            msg.qx = pRenderPose->rotation.x;
+            msg.qy = pRenderPose->rotation.y;
+            msg.qz = pRenderPose->rotation.z;
+        }
+        else
+        {
+            msg.qHeadValid = 0;
+            msg.qw = msg.qx = msg.qy = msg.qz = 0;
+        }
 
         uint64_t ftSent, ftAck, ftResult;
 
@@ -429,8 +438,8 @@ bool RM_NetClient_RegisterRenderBuffers(RM_NetClient * pClient, ID3D11Texture2D 
     return pClient->RegisterRenderBuffers(pTextures, textureCount);
 }
 
-bool RM_NetClient_PresentRenderBuffers(RM_NetClient * pClient, size_t bufferSetIndex)
+bool RM_NetClient_PresentRenderBuffers(RM_NetClient * pClient, size_t bufferSetIndex, RM_NetClient_PoseState const * pRenderPose)
 {
     //std::cerr << "RM_NetClient: line = " << __LINE__ << std::endl; 
-    return pClient->PresentRenderBuffers(bufferSetIndex);
+    return pClient->PresentRenderBuffers(bufferSetIndex, pRenderPose);
 }

@@ -49,7 +49,7 @@ using namespace DirectX;
 void OSVR_Init();
 std::vector<osvr::renderkit::RenderInfo> OSVR_GetRenderInfo(osvr::renderkit::RenderManager::RenderParams const & renderParams);
 void OSVR_Register(HANDLE * pHandles, size_t const count);
-int OSVR_Present(size_t idxBufPair);
+int OSVR_Present(size_t idxBufPair, OSVR_Quaternion * pQuat);
 void OSVR_Shutdown();
 
 #if defined(SendMessage)
@@ -278,11 +278,24 @@ void RenderManagerServer::RunOnce()
                     return; // Causes disconnect
                 }
 
-                auto const result = OSVR_Present(pMsg->idxBufferSet);
+                int presentResult = 0;
+                if (pMsg->qHeadValid)
+                {
+                    OSVR_Quaternion qHead;
+                    osvrQuatSetW(&qHead, pMsg->qw);
+                    osvrQuatSetX(&qHead, pMsg->qx);
+                    osvrQuatSetY(&qHead, pMsg->qy);
+                    osvrQuatSetZ(&qHead, pMsg->qz);
+                    presentResult = OSVR_Present(pMsg->idxBufferSet, &qHead);
+                }
+                else
+                {
+                    presentResult = OSVR_Present(pMsg->idxBufferSet, nullptr);
+                }
 
-                PresentResult presentResult; 
-                presentResult.resultCode = result;
-                if (!SendMessage(&presentResult, sizeof(presentResult)))
+                PresentResult presentResultMsg; 
+                presentResultMsg.resultCode = presentResult;
+                if (!SendMessage(&presentResultMsg, sizeof(presentResultMsg)))
                 {
                     std::cerr << "Failed to write present result message" << std::endl;
                     return; // Causes disconnect

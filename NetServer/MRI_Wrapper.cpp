@@ -261,7 +261,7 @@ void OSVR_Register(HANDLE * pHandles, size_t const handleCount)
     }
 }
 
-int OSVR_Present(size_t idxBufPair)//, double quat_xyzw[4])
+int OSVR_Present(size_t idxBufPair, OSVR_Quaternion * pQuat)
 {
     if (!s_pAppState || !s_pAppState->pRenderManager )
         return -1;
@@ -311,8 +311,18 @@ int OSVR_Present(size_t idxBufPair)//, double quat_xyzw[4])
         }
     }
 
+    auto renderInfoUsed = s_pAppState->renderInfo;
+    if (pQuat)
+    {
+        auto tempParams = s_pAppState->renderParams;
+        OSVR_PoseState state = { 0 };
+        state.rotation = *pQuat;
+        tempParams.roomFromHeadReplace = &state;
+        renderInfoUsed = s_pAppState->pRenderManager->GetRenderInfo(tempParams);
+    }
+
     int result = 0;
-    if (pRM->PresentRenderBuffers(buffers, s_pAppState->renderInfo, s_pAppState->renderParams))
+    if (pRM->PresentRenderBuffers(buffers, renderInfoUsed, s_pAppState->renderParams))
         result = 0;
     else
         result = -2;

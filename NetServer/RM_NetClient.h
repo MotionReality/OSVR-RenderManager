@@ -30,8 +30,14 @@ typedef struct RM_NetClient_ViewportDescription {
 
 typedef struct RM_NetClient_PoseState
 {
-    double translation[3]; // OSVR_Vec3
-    double rotation[4]; // OSVR_Quaternion
+    double translation[3]; //!< OSVR_Vec3
+    struct //!< OSVR_Quaternion
+    {
+        double w; 
+        double x;
+        double y;
+        double z;        
+    } rotation;
 } RM_NetClient_PoseState;
 
 typedef struct
@@ -66,8 +72,10 @@ RM_NetClient_GetRenderInfo(RM_NetClient * pClient, size_t idx, RM_NetRenderInfo 
 EXTERN_C OSVR_RENDERMANAGER_NETCLIENT_EXPORT bool
     RM_NetClient_RegisterRenderBuffers(RM_NetClient * pClient, ID3D11Texture2D ** pTextures, size_t textureCount);
 
+//! Present the set of render buffers indexed by @a bufferSetIndex
+//! @param [in] pRenderPose The pose used to render the provided images (optional)
 EXTERN_C OSVR_RENDERMANAGER_NETCLIENT_EXPORT bool
-	RM_NetClient_PresentRenderBuffers(RM_NetClient * pClient, size_t bufferSetIndex);
+	RM_NetClient_PresentRenderBuffers(RM_NetClient * pClient, size_t bufferSetIndex, RM_NetClient_PoseState const * pRenderPose);
 
 
 #endif //RM_NETCLIENT_H_920385092345234

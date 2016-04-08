@@ -330,6 +330,7 @@ bool RenderManagerServer::SendMessage(void * pBuffer, size_t lenBytes)
         std::cerr << "Failed to send message: " << ::GetLastError() << std::endl;
         return false;
     }
+    return true;
 }
 
 bool RenderManagerServer::ReceiveMessage(void * pBuffer, size_t maxLenBytes, size_t * pActualLenBytes)

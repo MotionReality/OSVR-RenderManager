@@ -12,7 +12,7 @@
 #include <windows.h> // For handle
 #include <cstdint>
 
-#include <osvr/RenderKit/RenderManagerC.h>
+#include <NetServer/RM_NetRenderInfo.h>
 
 #pragma pack(push,4)
 namespace Messages
@@ -56,7 +56,7 @@ namespace Messages
     };
 
     enum {
-        RENDER_INFO_SIZE = sizeof(OSVR_ViewportDescription) + sizeof(OSVR_PoseState) + sizeof(OSVR_ProjectionMatrix),
+        RENDER_INFO_SIZE = sizeof(RM_NetRenderInfo),
         MAX_RENDERINFO_COUNT = 8
     };
 

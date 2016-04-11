@@ -35,6 +35,9 @@
 #include <string>
 #include <stdlib.h> // For exit()
 #include <chrono>
+#include <vector>
+#include <memory>
+
 
 #include <osvr/RenderKit/RenderManager.h>
 

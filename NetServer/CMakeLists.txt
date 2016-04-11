@@ -11,10 +11,10 @@ if(OSVRRM_HAVE_D3D11_SUPPORT)
     include (GenerateExportHeader)
     
 	# D3D Example program using Present mode, with a networked client
-	add_executable(RM_NetServer RM_NetServer.cpp MRI_Wrapper.cpp NetMessages.h)
+	add_executable(RM_NetServer RM_NetServer.cpp MRI_Wrapper.cpp NetMessages.h RM_NetRenderInfo.h)
 	target_link_libraries(RM_NetServer PRIVATE osvrRM::osvrRenderManagerCpp)
     
-    set(RM_NetClient_PUBLIC_HEADERS RM_NetClient.h "${CMAKE_CURRENT_BINARY_DIR}/NetServer/RM_NetClient_Export.h")
+    set(RM_NetClient_PUBLIC_HEADERS RM_NetClient.h RM_NetRenderInfo.h "${CMAKE_CURRENT_BINARY_DIR}/NetServer/RM_NetClient_Export.h")
     add_library(RM_NetClient RM_NetClient.cpp "${RM_NetClient_PUBLIC_HEADERS}" NetMessages.h)
     target_include_directories(RM_NetClient PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>

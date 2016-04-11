@@ -52,10 +52,8 @@ static ID3D11Texture2D * CloneToDev(ID3D11Device * pTargetDev, ID3D11Texture2D *
     return CloneToDev(pTargetDev, GetSharedHandle(pSourceTex));
 }
 
-static RenderBufferD3D11 * MakeRenderBuffer(ID3D11Device * pDevice, ID3D11Texture2D * pTex)
+static ID3D11RenderTargetView * MakeRenderTargetView(ID3D11Device * pDevice, ID3D11Texture2D * pTex)
 {
-    RenderBufferD3D11 * pResult = nullptr;
-
     D3D11_TEXTURE2D_DESC desc;
     pTex->GetDesc(&desc);
 
@@ -71,15 +69,7 @@ static RenderBufferD3D11 * MakeRenderBuffer(ID3D11Device * pDevice, ID3D11Textur
     if (FAILED(hr) || pRenderTargetView == nullptr) {
         std::cerr << "Could not create render target for eye " << std::endl;
     }
-    else
-    {
-        pResult = new RenderBufferD3D11;
-        memset(pResult, 0, sizeof(*pResult));
-        pResult->colorBuffer = pTex;
-        pResult->colorBufferView = pRenderTargetView;
-    }
-
-    return pResult;
+    return pRenderTargetView;
 }
 
 template<typename T> void SAFE_RELEASE(T * const p)
@@ -249,7 +239,9 @@ void OSVR_Register(HANDLE * pHandles, size_t const handleCount)
             }
             auto & rb = bufPair[eye];
             memset(&rb, 0, sizeof(rb));
-            rb.D3D11 = MakeRenderBuffer(pDevice, pTex);
+            rb.D3D11 = new RenderBufferD3D11;
+            memset(rb.D3D11, 0, sizeof(*rb.D3D11));
+            rb.D3D11->colorBuffer = pTex;
         }
 
         if (!s_pAppState->pRenderManager->RegisterRenderBuffers(bufPair, false))
@@ -303,7 +295,8 @@ int OSVR_Present(size_t idxBufPair, OSVR_Quaternion * pQuat)
     for (size_t i = 0; i < buffers.size(); ++i)
     {
         IDXGIKeyedMutex * pMutex = nullptr;
-        buffers[i].D3D11->colorBuffer->QueryInterface(_uuidof(IDXGIKeyedMutex), (void**)&pMutex);
+        auto * pD3D11 = buffers[i].D3D11;
+        pD3D11->colorBuffer->QueryInterface(_uuidof(IDXGIKeyedMutex), (void**)&pMutex);
         if (pMutex)
         {
             pMutex->AcquireSync(0, INFINITE);

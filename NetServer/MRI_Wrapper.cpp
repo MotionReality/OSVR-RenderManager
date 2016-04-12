@@ -81,28 +81,12 @@ template<typename T> void SAFE_RELEASE(T * const p)
 struct AppState
 {
     AppState()
-        : context(nullptr)
-    {
-        context = osvrClientInit("com.motionreality.RM_Server");
-    }
+        : idxActiveBufferSet(-1)
+        , context(osvrClientInit("com.motionreality.RM_Server"))
+    {   }
 
     ~AppState()
     {
-        for (auto itPair = bufferPairs.begin(); itPair != bufferPairs.end(); ++itPair)
-        {
-            for (auto it = itPair->begin(); it != itPair->end(); ++it)
-            {
-                if (it->D3D11)
-                {
-                    SAFE_RELEASE(it->D3D11->colorBuffer);
-                    SAFE_RELEASE(it->D3D11->colorBufferView);
-                    SAFE_RELEASE(it->D3D11->depthStencilBuffer);
-                    SAFE_RELEASE(it->D3D11->depthStencilView);
-                    delete it->D3D11;
-                }
-            }
-        }
-
         if (context)
         {
             osvrClientShutdown(context);
@@ -110,12 +94,49 @@ struct AppState
         }
     }
 
+    struct BufferSet
+    {
+        BufferSet() { }
+        BufferSet(BufferSet && rhs)
+        {
+            *this = rhs;
+        }
+
+        ~BufferSet()
+        {
+            for (auto & pKeyedMutex : mutexes)
+            {
+                SAFE_RELEASE(pKeyedMutex);
+            }
+            for (auto & buf : buffers)
+            {
+                if (buf.D3D11)
+                {
+                    SAFE_RELEASE(buf.D3D11->colorBuffer);
+                    SAFE_RELEASE(buf.D3D11->colorBufferView);
+                    SAFE_RELEASE(buf.D3D11->depthStencilBuffer);
+                    SAFE_RELEASE(buf.D3D11->depthStencilView);
+                    delete buf.D3D11;
+                }
+            }
+        }
+
+        BufferSet & operator=(BufferSet && rhs)
+        {
+            mutexes = std::move(rhs.mutexes);
+            buffers = std::move(rhs.buffers);
+        }
+
+        std::vector<IDXGIKeyedMutex*> mutexes;
+        std::vector<RenderBuffer> buffers;
+    };
+    std::vector<BufferSet> bufferSets;
+    int idxActiveBufferSet; 
+    
     OSVR_ClientContext context;
     std::unique_ptr<RenderManager> pRenderManager;
     osvr::renderkit::RenderManager::RenderParams renderParams;
-    std::vector<osvr::renderkit::RenderInfo> renderInfo;
-    typedef std::vector<RenderBuffer> BufferPair;
-    std::vector<BufferPair> bufferPairs;
+    std::vector<osvr::renderkit::RenderInfo> renderInfo;    
 };
 
 static std::unique_ptr<AppState> s_pAppState;
@@ -146,9 +167,15 @@ void OSVR_Init()
         }
     }
 
+    std::cerr << "Opened OSVR ClientContext" << std::endl;
     appState->pRenderManager.reset(createRenderManager(appState->context, "Direct3D11"));
-    if ((appState->pRenderManager == nullptr) || (!appState->pRenderManager->doingOkay())) {
+    if (appState->pRenderManager == nullptr) {
         std::cerr << "Could not create RenderManager" << std::endl;
+        return;
+    }
+
+    if (!appState->pRenderManager->doingOkay()) {
+        std::cerr << "RenderManager not doing okay. Aborting." << std::endl;
         return;
     }
 
@@ -219,17 +246,24 @@ void OSVR_Register(HANDLE * pHandles, size_t const handleCount)
     auto const & info = s_pAppState->renderInfo[0];
     auto * const pDevice = info.library.D3D11->device;
 
-    std::cerr << "Cloning device handles: " << handleCount << std::endl;
-    bool bFail = false;
-    size_t const pairCount = handleCount / 2;
-    s_pAppState->bufferPairs.resize(pairCount);
-    for (size_t iPair = 0; iPair < pairCount; ++iPair)
+    
+    size_t const setSize = s_pAppState->renderInfo.size();
+    size_t const setCount = handleCount / setSize;
+
+    std::cerr << "Cloning device handles: " << handleCount << " handles, "
+        << setCount << " sets" << std::endl;
+
+    s_pAppState->idxActiveBufferSet = -1;
+    s_pAppState->bufferSets.clear();
+    s_pAppState->bufferSets.resize(setCount);
+    for (size_t iSet = 0; iSet < setCount; ++iSet )
     {
-        auto & bufPair = s_pAppState->bufferPairs[iPair];
-        bufPair.resize(2);
-        for (size_t eye = 0; eye < 2; ++eye)
+        auto & bufSet = s_pAppState->bufferSets[iSet];
+        bufSet.buffers.resize(setSize);
+        bufSet.mutexes.resize(setSize);
+        for (size_t i = 0; i < setSize; ++i)
         {
-            HANDLE const h = pHandles[iPair * 2 + eye];
+            HANDLE const h = pHandles[iSet * setSize + i];
             std::cerr << "    Handle: " << std::hex << h << std::endl;
             ID3D11Texture2D * pTex = CloneToDev(pDevice, h);
             if (!pTex)
@@ -237,42 +271,58 @@ void OSVR_Register(HANDLE * pHandles, size_t const handleCount)
                 std::cerr << "Failed to open shared texture" << std::endl;
                 return; // AppState dtor will cleanup
             }
-            auto & rb = bufPair[eye];
+            auto & rb = bufSet.buffers[i];
             memset(&rb, 0, sizeof(rb));
             rb.D3D11 = new RenderBufferD3D11;
             memset(rb.D3D11, 0, sizeof(*rb.D3D11));
             rb.D3D11->colorBuffer = pTex;
+
+            auto hr = pTex->QueryInterface(__uuidof(IDXGIKeyedMutex), (void**)&bufSet.mutexes[i]);
+            if (FAILED(hr))
+            {
+                std::cerr << "Failed to get KeyedMutex for shared texture" << hr << std::endl;
+                return;
+            }
         }
 
-        if (!s_pAppState->pRenderManager->RegisterRenderBuffers(bufPair, false))
+        for (auto * pMutex : bufSet.mutexes)
+        {
+            auto hr = pMutex->AcquireSync(0, INFINITE);
+            if (FAILED(hr))
+            {
+                std::cerr << "Failed to acquire mutex for texture: " << hr << std::endl;
+            }
+        }
+        bool const bSuccess = s_pAppState->pRenderManager->RegisterRenderBuffers(bufSet.buffers, true);
+        for (auto * pMutex : bufSet.mutexes)
+        {
+            auto hr = pMutex->ReleaseSync(0);
+            if (FAILED(hr))
+            {
+                std::cerr << "Failed to acquire mutex for texture: " << hr << std::endl;
+            }
+        }
+
+        if (!bSuccess)
         {
             std::cerr << "Failed to register render buffers: " << std::endl;
-            bFail = true;
-            break;
+            return;
         }
     }
 }
 
-int OSVR_Present(size_t idxBufPair, OSVR_Quaternion * pQuat)
+int OSVR_Present(size_t idxBufSet, OSVR_Quaternion * pQuat)
 {
     if (!s_pAppState || !s_pAppState->pRenderManager )
         return -1;
 
-    if (!(idxBufPair < s_pAppState->bufferPairs.size()))
+    if (!(idxBufSet < s_pAppState->bufferSets.size()))
     {
-        std::cerr << "Invalid buffer pair index: " << idxBufPair << std::endl;
+        std::cerr << "Invalid buffer set index: " << idxBufSet << std::endl;
         return -1;
     }
 
-    //OSVR_PoseState poseRoomFromHead;
-    //osvrVec3Zero(&poseRoomFromHead.translation);
-    //osvrQuatSetX(&poseRoomFromHead.rotation, quat_xyzw[0]);
-    //osvrQuatSetY(&poseRoomFromHead.rotation, quat_xyzw[1]);
-    //osvrQuatSetZ(&poseRoomFromHead.rotation, quat_xyzw[2]);
-    //osvrQuatSetW(&poseRoomFromHead.rotation, quat_xyzw[3]);
-
-    //RenderManager::RenderParams params;
-    //params.roomFromHeadReplace = &poseRoomFromHead;
+    //std::cerr << "OSVR_Present( " << idxBufSet << ")" << std::endl;
 
     //static int counter = 0;
     //++counter;
@@ -281,28 +331,8 @@ int OSVR_Present(size_t idxBufPair, OSVR_Quaternion * pQuat)
     //    fprintf(stderr, "PRE: %2.6f, %2.6f, %2.6f, %2.6f (counter = %u)\n",
     //        quat_xyzw[0], quat_xyzw[1], quat_xyzw[2], quat_xyzw[3], counter);
     //}
-    
-    //std::cerr << "Present quat: "
-    //    << osvrQuatGetX(&poseRoomFromHead.rotation) << ", "
-    //    << osvrQuatGetY(&poseRoomFromHead.rotation) << ", "
-    //    << osvrQuatGetZ(&poseRoomFromHead.rotation) << ", "
-    //    << osvrQuatGetW(&poseRoomFromHead.rotation) << std::endl;
 
     auto * const pRM = s_pAppState->pRenderManager.get();
-    //auto renderInfo = pRM->GetRenderInfo(params);
-
-    auto const & buffers = s_pAppState->bufferPairs[idxBufPair];
-    for (size_t i = 0; i < buffers.size(); ++i)
-    {
-        IDXGIKeyedMutex * pMutex = nullptr;
-        auto * pD3D11 = buffers[i].D3D11;
-        pD3D11->colorBuffer->QueryInterface(_uuidof(IDXGIKeyedMutex), (void**)&pMutex);
-        if (pMutex)
-        {
-            pMutex->AcquireSync(0, INFINITE);
-            pMutex->Release();
-        }
-    }
 
     auto renderInfoUsed = s_pAppState->renderInfo;
     if (pQuat)
@@ -314,23 +344,34 @@ int OSVR_Present(size_t idxBufPair, OSVR_Quaternion * pQuat)
         renderInfoUsed = s_pAppState->pRenderManager->GetRenderInfo(tempParams);
     }
 
-    int result = 0;
-    if (pRM->PresentRenderBuffers(buffers, renderInfoUsed, s_pAppState->renderParams))
-        result = 0;
-    else
-        result = -2;
+    auto const & bufSet = s_pAppState->bufferSets[idxBufSet];
 
-    for (size_t i = 0; i < buffers.size(); ++i)
+    for (auto * pMutex : bufSet.mutexes)
     {
-        IDXGIKeyedMutex * pMutex = nullptr;
-        buffers[i].D3D11->colorBuffer->QueryInterface(_uuidof(IDXGIKeyedMutex), (void**)&pMutex);
-        if (pMutex)
+        auto hr = pMutex->AcquireSync(0, INFINITE);
+        if (FAILED(hr))
         {
-            pMutex->ReleaseSync(0);
-            pMutex->Release();
+            std::cerr << "Failed to acquire mutex for texture: " << hr << std::endl;
         }
     }
 
-    return result;
+    bool bSuccess = pRM->PresentRenderBuffers(bufSet.buffers, renderInfoUsed, s_pAppState->renderParams);
+
+    if (s_pAppState->idxActiveBufferSet >= 0 && s_pAppState->idxActiveBufferSet < s_pAppState->bufferSets.size())
+    {
+        auto & lastBufSet = s_pAppState->bufferSets[s_pAppState->idxActiveBufferSet];
+        for (auto * pMutex : lastBufSet.mutexes)
+        {
+            auto hr = pMutex->ReleaseSync(0);
+            if (FAILED(hr))
+            {
+                std::cerr << "Failed to release mutex for texture: " << hr << std::endl;
+            }
+        }
+    }
+
+    s_pAppState->idxActiveBufferSet = idxBufSet;
+
+    return bSuccess ? 0 : -2;
 }
 

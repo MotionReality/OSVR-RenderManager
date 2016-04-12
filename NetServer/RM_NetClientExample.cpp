@@ -142,7 +142,12 @@ void RenderView(
     float viewD3D[16];
     XMMATRIX identity = XMMatrixIdentity();
 
-    bufferInfo.colorMutex->AcquireSync(0, INFINITE);
+    auto hr = bufferInfo.colorMutex->AcquireSync(0, INFINITE);
+    if (FAILED(hr))
+    {
+        std::cerr << "Failed to acquire sync: " << hr << std::endl;
+        return;
+    }
 
     // Set up to render to the textures for this eye
     context->OMSetRenderTargets(1, &bufferInfo.colorView, bufferInfo.depthView);
@@ -170,7 +175,12 @@ void RenderView(
     simpleShader.use(device, context, xm_projectionD3D, xm_viewD3D, identity);
     roomCube.draw(device, context);
 
-    bufferInfo.colorMutex->ReleaseSync(0);
+    hr = bufferInfo.colorMutex->ReleaseSync(0);
+    if (FAILED(hr))
+    {
+        std::cerr << "Failed to release sync: " << hr << std::endl;
+        return;
+    }
 }
 
 void Usage(std::string name) {
@@ -255,7 +265,7 @@ int main(int argc, char* argv[]) {
 
     // Set up the vector of textures to render to and any framebuffer
     // we need to group them.
-    std::vector<BufferInfo> renderBufferInfos(renderInfo.size());
+    std::vector<BufferInfo> renderBufferInfos(renderInfo.size()*2);
 
     for (size_t i = 0; i < renderBufferInfos.size(); i++) {
 
@@ -265,8 +275,8 @@ int main(int argc, char* argv[]) {
         //  Note that this texture format must be RGBA and unsigned byte,
         // so that we can present it to Direct3D for DirectMode.
         ID3D11Texture2D* D3DTexture = nullptr;
-        unsigned width = static_cast<int>(renderInfo[i].viewport.width);
-        unsigned height = static_cast<int>(renderInfo[i].viewport.height);
+        unsigned width = static_cast<int>(renderInfo[i%renderInfo.size()].viewport.width);
+        unsigned height = static_cast<int>(renderInfo[i%renderInfo.size()].viewport.height);
 
         // Initialize a new render target texture description.
         D3D11_TEXTURE2D_DESC textureDesc = {};
@@ -420,6 +430,7 @@ int main(int argc, char* argv[]) {
     start = std::chrono::system_clock::now();
     
     // Continue rendering until it is time to quit.
+    size_t toggle = 0;
     while (!quit) {
         ::Sleep(8);
 
@@ -434,15 +445,16 @@ int main(int argc, char* argv[]) {
         }
 
         // Render into each buffer using the specified information.
+        size_t offset = toggle * renderInfo.size();
         for (size_t i = 0; i < renderInfo.size(); i++) {
             myContext->OMSetDepthStencilState(depthStencilState, 1);
-            RenderView(myDevice, myContext, renderInfo[i], renderBufferInfos[i]);
+            RenderView(myDevice, myContext, renderInfo[i], renderBufferInfos[i+offset]);
         }
 
         //myContext->Flush();
 
         // Send the rendered results to the screen
-        if (!RM_NetClient_PresentRenderBuffers(pNetClient.get(), 0, nullptr)) {
+        if (!RM_NetClient_PresentRenderBuffers(pNetClient.get(), toggle, nullptr)) {
             std::cerr << "PresentRenderBuffers() returned false, maybe because "
                          "it was asked to quit"
                       << std::endl;
@@ -476,6 +488,7 @@ int main(int argc, char* argv[]) {
             count = 0;
         }
         count++;
+        toggle = toggle ^ 0x01;
     }
 
     pNetClient.reset();

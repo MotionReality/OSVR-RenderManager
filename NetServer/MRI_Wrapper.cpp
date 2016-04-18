@@ -238,6 +238,11 @@ std::vector<osvr::renderkit::RenderInfo> OSVR_GetRenderInfo(osvr::renderkit::Ren
 
 void OSVR_Register(HANDLE * pHandles, size_t const handleCount)
 {
+    if (s_pAppState.get() && !s_pAppState->bufferSets.empty()) {
+        // Force a reset if we try to register twice
+        OSVR_Shutdown();
+    }
+
     OSVR_Init();
 
     if (!s_pAppState.get())

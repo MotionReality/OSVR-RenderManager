@@ -258,7 +258,6 @@ void RenderManagerServer::RunOnce()
                 }
                 std::cerr << "RegisterBuffers has " << pMsg->numBuffers << " buffer handles" << std::endl;
                 auto * const pHandles = reinterpret_cast<HANDLE*>(&pMsg[1]);
-                OSVR_Init();
                 OSVR_Register(&pHandles[0], pMsg->numBuffers);
             }
             break;

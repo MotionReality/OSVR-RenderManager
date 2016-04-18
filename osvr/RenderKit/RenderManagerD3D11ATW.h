@@ -64,6 +64,8 @@ namespace osvr {
 
             std::mutex mLock;
             std::shared_ptr<std::thread> mThread = nullptr;
+
+            std::mutex mPresentCounterLock;
             std::atomic<unsigned int> mPresentCounterIn;
             std::atomic<unsigned int> mPresentCounterOut;
             std::condition_variable mPresentCounterChanged;
@@ -148,7 +150,7 @@ namespace osvr {
                 // We are agreeing to call PresentFinalize ourselves.
                 // This allows us to release our lock on the render
                 // buffers while we wait for VSync
-                mRenderManager->EnableDeferredFinalize(false);
+                mRenderManager->EnableDeferredFinalize(true);
 
                 //======================================================
                 // Fill in our library with the things the application may need to
@@ -274,11 +276,14 @@ namespace osvr {
                   mNextFrameInfo.renderParams = renderParams;
                   mNextFrameInfo.normalizedCroppingViewports = normalizedCroppingViewports;
 
+                  lock.unlock();
+
                   if (m_params.m_verticalSyncBlocksRendering) {
+                      std::unique_lock<std::mutex> presentLock(mPresentCounterLock);
                       auto const nextCount = ++mPresentCounterIn;
-                      int diff;
+                      int diff;                      
                       do {
-                          auto status = mPresentCounterChanged.wait_for(lock, std::chrono::milliseconds(100));
+                          auto status = mPresentCounterChanged.wait_for(presentLock, std::chrono::milliseconds(100));
                           if (status == std::cv_status::timeout) {
                               std::cerr << "Timeout waiting for ATW thread to present" << std::endl;
                               mQuit = true;
@@ -394,6 +399,15 @@ namespace osvr {
                                     m_doingOkay = false;
                                     mQuit = true;
                                 }
+
+                                if (m_params.m_verticalSyncBlocksRendering)
+                                {
+                                    {
+                                        std::unique_lock<std::mutex> presentLock(mPresentCounterLock);
+                                        mPresentCounterOut = currentPresentCounter;
+                                    }
+                                    mPresentCounterChanged.notify_all();
+                                }
                             }
 
                             iteration++;
@@ -411,15 +425,10 @@ namespace osvr {
 
                     if (bPresented)
                     {
-                        if (m_params.m_verticalSyncBlocksRendering)
-                        {
-                            {
-                                std::lock_guard<std::mutex> lock(mLock);
-                                mPresentCounterOut = currentPresentCounter;
-                            }
-                            mPresentCounterChanged.notify_all();
-                        }
-
+                        //if (m_params.m_verticalSyncBlocksRendering)
+                        //{
+                        //    mPresentCounterChanged.notify_all();
+                        //}
                         //std::cerr << "Calling PresentFinalize" << std::endl;
 
                         // We agreed to call this when we called EnableDeferredFinalize

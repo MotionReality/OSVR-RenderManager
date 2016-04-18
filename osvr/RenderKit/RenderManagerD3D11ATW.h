@@ -35,6 +35,8 @@ Sensics, Inc.
 #include <mutex>
 #include <functional>
 #include <map>
+#include <atomic>
+#include <condition_variable>
 
 namespace osvr {
     namespace renderkit {
@@ -62,6 +64,9 @@ namespace osvr {
 
             std::mutex mLock;
             std::shared_ptr<std::thread> mThread = nullptr;
+            std::atomic<unsigned int> mPresentCounterIn;
+            std::atomic<unsigned int> mPresentCounterOut;
+            std::condition_variable mPresentCounterChanged;
 
             /// Holds information about the buffers to be used by the next rendering
             /// pass.  This is filled in by PresentRenderBuffersInternal() and used
@@ -88,7 +93,11 @@ namespace osvr {
             RenderManagerD3D11ATW(
                 OSVR_ClientContext context,
                 ConstructorParameters p, RenderManagerD3D11Base* D3DToHarness)
-                : RenderManagerD3D11Base(context, p) {
+                : RenderManagerD3D11Base(context, p)
+                , mPresentCounterIn(0)
+                , mPresentCounterOut(0)
+                , mPresentCounterChanged()
+            {
                 mRenderManager.reset(D3DToHarness);
             }
 
@@ -97,6 +106,7 @@ namespace osvr {
                     stop();
                     mThread->join();
                 }
+
                 // Delete textures and views that we allocated or otherwise opened
                 std::map<osvr::renderkit::RenderBufferD3D11*, RenderBufferATWInfo>::iterator i;
                 for (i = mBufferMap.begin(); i != mBufferMap.end(); i++) {
@@ -168,7 +178,7 @@ namespace osvr {
                 bool flipInY = false) override {
 
                   // Lock our mutex so we don't adjust the buffers while rendering is happening.
-                  std::lock_guard<std::mutex> lock(mLock);
+                  std::unique_lock<std::mutex> lock(mLock);
                   HRESULT hr;
 
                   // For all the buffers that have been given to the ATW thread,
@@ -263,6 +273,20 @@ namespace osvr {
                   mNextFrameInfo.flipInY = flipInY;
                   mNextFrameInfo.renderParams = renderParams;
                   mNextFrameInfo.normalizedCroppingViewports = normalizedCroppingViewports;
+
+                  if (m_params.m_verticalSyncBlocksRendering) {
+                      auto const nextCount = ++mPresentCounterIn;
+                      int diff;
+                      do {
+                          auto status = mPresentCounterChanged.wait_for(lock, std::chrono::milliseconds(100));
+                          if (status == std::cv_status::timeout) {
+                              std::cerr << "Timeout waiting for ATW thread to present" << std::endl;
+                              mQuit = true;
+                              break;
+                          }
+                          diff = (int)(mPresentCounterIn - mPresentCounterOut);
+                      } while (diff > 0);
+                  }
                   return true;
             }
 
@@ -327,6 +351,7 @@ namespace osvr {
 
                     bool bPresented = false;
                     bool bShouldSleep = false;
+                    unsigned int currentPresentCounter = 0;
 
                     if (timeToPresent) {
                         // Lock our mutex so that we're not rendering while new buffers are
@@ -386,6 +411,15 @@ namespace osvr {
 
                     if (bPresented)
                     {
+                        if (m_params.m_verticalSyncBlocksRendering)
+                        {
+                            {
+                                std::lock_guard<std::mutex> lock(mLock);
+                                mPresentCounterOut = currentPresentCounter;
+                            }
+                            mPresentCounterChanged.notify_all();
+                        }
+
                         //std::cerr << "Calling PresentFinalize" << std::endl;
 
                         // We agreed to call this when we called EnableDeferredFinalize

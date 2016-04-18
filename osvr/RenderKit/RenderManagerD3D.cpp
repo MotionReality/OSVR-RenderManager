@@ -259,12 +259,9 @@ namespace renderkit {
     }
 
     bool RenderManagerD3D11::PresentDisplayFinalize(size_t display) {
-        if (display >= GetNumDisplays()) {
-            return false;
-        }
-
-        // Forcefully sync device rendering to the shared surface.
-        m_D3D11Context->Flush();
+        // Wait for the TW+distortion work to finish before
+        // swapping the buffers.
+        WaitForFrameCompletion();
 
         // Present the just-rendered surface, waiting for vertical
         // blank if asked to.

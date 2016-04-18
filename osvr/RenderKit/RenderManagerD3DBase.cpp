@@ -34,6 +34,8 @@ Sensics, Inc.
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
+#include <thread>
+
 static const char* distortionVertexShader =
     "cbuffer cbPerObject"
     "{"
@@ -135,7 +137,10 @@ namespace renderkit {
     RenderManagerD3D11Base::RenderManagerD3D11Base(
         OSVR_ClientContext context,
         ConstructorParameters p)
-        : RenderManager(context, p) {
+        : RenderManager(context, p)
+        , m_completionQuery(nullptr)
+        , m_completionQueryPending(false)
+    {
         // Initialize all of the variables that don't have to be done in the
         // list above, so we don't get warnings about out-of-order
         // initialization if they are re-ordered in the header file.
@@ -168,6 +173,12 @@ namespace renderkit {
         }
         if (m_depthStencilStateForRender != nullptr) {
           m_depthStencilStateForRender->Release();
+        }
+
+        if (m_completionQuery)
+        {
+            m_completionQuery->Release();
+            m_completionQuery = nullptr;
         }
 
         delete m_buffers.D3D11;
@@ -402,6 +413,21 @@ namespace renderkit {
           return ret;
         }
 
+        {
+            D3D11_QUERY_DESC desc = {};
+            desc.Query = D3D11_QUERY_EVENT;
+            hr = m_D3D11device->CreateQuery(&desc, &m_completionQuery);
+            if (FAILED(hr)) {
+                std::cerr << "RenderManagerD3D11Base::OpenDisplay: "
+                    "Failed to create completion event query: "
+                    << StringFromD3DError(hr)
+                    << std::endl;
+                m_completionQuery = nullptr;
+                ret.status = FAILURE;
+                return ret; // Maybe this doesn't have to be a hard failure
+            }
+        }
+        
         //==================================================================
         // Create the vertex buffer we're going to use to render quads in
         // the Present mode and also set up the vertex and shader programs
@@ -990,7 +1016,6 @@ namespace renderkit {
     bool RenderManagerD3D11Base::PresentFrameInitialize() {
         /// @todo Construct our vertex and fragment shaders, one per actual
         /// display.
-
         return true;
     }
 
@@ -1161,7 +1186,64 @@ namespace renderkit {
 
         // Clean up after ourselves.
         renderTextureResourceView->Release();
+
         return true;
+    }
+    
+    bool RenderManagerD3D11Base::PresentDisplayCommit(size_t display) {
+        return true;
+    }
+
+    bool RenderManagerD3D11Base::PresentFrameCommit() {
+        if (m_completionQuery )//&& !m_completionQueryPending)
+        {
+            m_D3D11Context->End(m_completionQuery);
+            m_completionQueryPending = true;
+        }
+
+        // Forcefully push device rendering commands to the GPU to hope to
+        // get things there before it is presented.
+        // @todo Consider moving this to after the vsync wait below.
+        m_D3D11Context->Flush();
+        return true;
+    }
+
+    bool RenderManagerD3D11Base::PresentFrameFinalize() {
+        // Wait for the TW+distortion work to finish before
+        // swapping the buffers.
+        WaitForFrameCompletion();
+        return true;
+    }
+
+    void RenderManagerD3D11Base::WaitForFrameCompletion() {
+        //return;
+        
+        if (m_completionQuery)// && m_completionQueryPending)
+        {
+            auto start = std::chrono::high_resolution_clock::now();
+            while (m_D3D11Context->GetData(m_completionQuery, nullptr, 0, 0) == S_FALSE)
+            {
+                std::this_thread::yield();
+            }
+            m_completionQueryPending = false;
+            auto end = std::chrono::high_resolution_clock::now();
+            using dur = decltype(end - start);
+            static dur total = dur::zero(), most = dur::zero();
+            static size_t counter = 0;
+            auto diff = end - start;
+            total += diff;
+            most = std::max(most, diff);
+            ++counter;
+            if (counter >= 120)
+            {
+                std::chrono::duration<double, std::micro> avg = (total / counter);
+                std::chrono::duration<double, std::micro> mostMicro = most;
+                std::cerr << "Average/Max wait: " << avg.count() << ", " << mostMicro.count() << std::endl;
+                counter = 0;
+                total = dur::zero();
+                most = dur::zero();
+            }
+        }
     }
 
 } // namespace renderkit

@@ -135,6 +135,11 @@ namespace osvr {
                   return ret;
                 }
 
+                // We are agreeing to call PresentFinalize ourselves.
+                // This allows us to release our lock on the render
+                // buffers while we wait for VSync
+                mRenderManager->EnableDeferredFinalize(false);
+
                 //======================================================
                 // Fill in our library with the things the application may need to
                 // use to do its graphics state set-up.
@@ -320,6 +325,9 @@ namespace osvr {
                       timeToPresent = true;
                     }
 
+                    bool bPresented = false;
+                    bool bShouldSleep = false;
+
                     if (timeToPresent) {
                         // Lock our mutex so that we're not rendering while new buffers are
                         // being presented.
@@ -344,15 +352,19 @@ namespace osvr {
                                     atwRenderBuffers.push_back(bufferInfoItr->second.atwBuffer);
                                 }
 
+                                //std::cerr << "Calling PresentRenderBuffers" << std::endl;
                                 // Send the rendered results to the screen, using the
                                 // RenderInfo that was handed to us by the client the last
                                 // time they gave us some images.
-                                if (!mRenderManager->PresentRenderBuffers(
+                                currentPresentCounter = mPresentCounterIn;
+                                if (mRenderManager->PresentRenderBuffers(
                                     atwRenderBuffers,
                                     mNextFrameInfo.renderInfo,
                                     mNextFrameInfo.renderParams,
                                     mNextFrameInfo.normalizedCroppingViewports,
                                     mNextFrameInfo.flipInY)) {
+                                    bPresented = true;
+                                } else {
                                     std::cerr << "PresentRenderBuffers() returned false, maybe because it was asked to quit" << std::endl;
                                     m_doingOkay = false;
                                     mQuit = true;
@@ -361,7 +373,37 @@ namespace osvr {
 
                             iteration++;
                         }
+                        else
+                        {
+                            bShouldSleep = true;
+                        }
                     }
+
+                    if (bShouldSleep)
+                    {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                    }
+
+                    if (bPresented)
+                    {
+                        //std::cerr << "Calling PresentFinalize" << std::endl;
+
+                        // We agreed to call this when we called EnableDeferredFinalize
+                        // Doing this outside of `if(timeToPresent)` allows us to release
+                        // our internal lock which prevents the render thread from providing
+                        // new buffers.
+                        if (mRenderManager->m_deferredFinalize)
+                        {
+                            std::lock_guard<std::mutex> lock(mLock);
+                            if (!mRenderManager->PresentFinalize())
+                            {
+                                std::cerr << "PresentFrameFinalize2() returned false, maybe because it was asked to quit" << std::endl;
+                                m_doingOkay = false;
+                                mQuit = true;
+                            }
+                        }
+                    }
+
                     quit = mQuit;
                 }
             }
@@ -377,6 +419,7 @@ namespace osvr {
 
             bool PresentDisplayInitialize(size_t display) override { return true; }
             bool PresentDisplayFinalize(size_t display) override { return true; }
+            bool PresentFrameCommit() override { return true; }
             bool PresentFrameFinalize() override { return true; }
 
             //===================================================================

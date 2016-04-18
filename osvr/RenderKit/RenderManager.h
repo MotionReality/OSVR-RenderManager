@@ -999,6 +999,13 @@ namespace renderkit {
         bool m_renderBuffersRegistered; //!< Keeps track of whether we have
         //! registered buffers
 
+        //! Enables deferring calls to Present*Finalize from
+        //! PresentRenderBuffers() to be called later from
+        //! FinalizeDeferredPresent(). When this is enabled, the client must
+        //! ensure to call FinalizeDeferredPresent() after 
+        //! PresentRenderBuffers().
+        bool m_deferredFinalize;
+
         //=============================================================
         // These methods are helper methods for the Render* callback
         // functions below, making it easy for them to compute the
@@ -1340,10 +1347,24 @@ namespace renderkit {
         // the potential for multiple calls of any of the inner nesting
         // levels for a particular rendering recipe:
         //  PresentFrameInitialize
+        //  foreach(display)
         //      PresentDisplayInitialize
+        //      foreach(eye)
         //          PresentEye
-        //      PresentDisplayFinalize
-        //  PresentFrameFinalize
+        //      PresentDisplayCommit
+        //  PresentFrameCommit
+        //  if(!deferred)
+        //      foreach(display)
+        //          PresentDisplayFinalize
+        //      PresentFrameFinalize
+        //  
+        //  Calls to Present*Finalize can be deferred to a separate call
+        //  by calling EnableDeferredFinalize. This allows the caller to
+        //  spit work that requires the input render buffers from work
+        //  that does not. (e.g. for unlocking a mutex in the ATW thread)
+        //  GPU work should be enqueue/commited by the end of
+        //  Present*Commit calls. Present*Finalize calls can then block
+        //  for that work to finish and flip the work to the front buffers.
 
         /// @brief Initialize presentation for a new frame
         virtual bool PresentFrameInitialize() = 0;
@@ -1384,13 +1405,31 @@ namespace renderkit {
         };
         virtual bool PresentEye(PresentEyeParameters params) = 0;
 
+        /// @brief Commit presentation work for a new display
+        virtual bool PresentDisplayCommit(
+            size_t display //< Which display (0-indexed)
+            ) = 0;
+
+        /// @brief Commit presentation for a new frame
+        virtual bool PresentFrameCommit() = 0;
+
+        /// @brief Enable deferring the call to PresentFinalize
+        void EnableDeferredFinalize(bool bEnabled) { m_deferredFinalize = bEnabled; }
+
+        //! @brief Finalizes presentation work
+        //! @note Only to be called by clients if m_deferredFinalize is enabled
+        virtual bool PresentFinalize();
+
+        virtual bool PresentFinalizeInternal();
+
         /// @brief Finalize presentation for a new display
-        virtual bool
-        PresentDisplayFinalize(size_t display //< Which display (0-indexed)
-                               ) = 0;
+        virtual bool PresentDisplayFinalize(
+            size_t display //< Which display (0-indexed)
+            ) = 0;
 
         /// @brief Finalize presentation for a new frame
         virtual bool PresentFrameFinalize() = 0;
+        
 
         friend class RenderManagerNVidiaD3D11OpenGL;
         friend RenderManager OSVR_RENDERMANAGER_EXPORT*

@@ -312,6 +312,9 @@ namespace renderkit {
 
         // We haven't yet registered our render buffers, so can't present them
         m_renderBuffersRegistered = false;
+
+        // Must be enabled explicitly by the client
+        m_deferredFinalize = false;
     }
 
     bool RenderManager::SetDisplayCallback(DisplayCallback callback,
@@ -929,12 +932,52 @@ namespace renderkit {
                     return false;
                 }
             }
-
+            
             // We're done with this display.
             if (!PresentDisplayFinalize(display)) {
                 std::cerr << "RenderManager::PresentRenderBuffers(): "
-                             "PresentDisplayFinalize failed."
-                          << std::endl;
+                    "PresentDisplayFinalize failed."
+                    << std::endl;
+                return false;
+            }
+        }
+
+        // Finalize the rendering for the whole frame.
+        if (!PresentFrameCommit()) {
+            std::cerr << "RenderManager::PresentRenderBuffers(): "
+                "PresentFrameFinalize failed."
+                << std::endl;
+            return false;
+        }
+
+        if (!m_deferredFinalize) {
+            if (!this->PresentFinalizeInternal()) {
+                std::cerr << "RenderManager::PresentRenderBuffers(): "
+                    "PresentFinalizeInternal failed."
+                    << std::endl;
+                return false;
+            }
+        }
+
+        // Keep track of the timing information.
+        /// @todo
+
+        return true;
+    }
+
+    bool RenderManager::PresentFinalize()
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_deferredFinalize && this->PresentFinalizeInternal();
+    }
+
+    bool RenderManager::PresentFinalizeInternal() {
+        for (size_t display = 0; display < GetNumDisplays(); display++) {
+            // We're done with this display.
+            if (!PresentDisplayFinalize(display)) {
+                std::cerr << "RenderManager::PresentRenderBuffers(): "
+                    "PresentDisplayFinalize failed."
+                    << std::endl;
                 return false;
             }
         }
@@ -942,13 +985,10 @@ namespace renderkit {
         // Finalize the rendering for the whole frame.
         if (!PresentFrameFinalize()) {
             std::cerr << "RenderManager::PresentRenderBuffers(): "
-                         "PresentFrameFinalize failed."
-                      << std::endl;
+                "PresentFrameFinalize failed."
+                << std::endl;
             return false;
         }
-
-        // Keep track of the timing information.
-        /// @todo
 
         return true;
     }

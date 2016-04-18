@@ -95,6 +95,9 @@ namespace renderkit {
         ID3D11DeviceContext*
             m_D3D11Context; //< Pointer to the D3D11 context to use.
 
+        ID3D11Query* m_completionQuery;
+        bool m_completionQueryPending;
+
         //============================================================================
         // Information needed to provide render and depth/stencil buffers for
         // each of the eyes we give to the user to use when rendering.  This is
@@ -190,6 +193,12 @@ namespace renderkit {
 
         bool PresentFrameInitialize() override;
         bool PresentEye(PresentEyeParameters params) override;
+
+        bool PresentDisplayCommit(size_t display) override;
+        bool PresentFrameCommit() override;
+        bool PresentFrameFinalize() override = 0;
+
+        void WaitForFrameCompletion();
 
         friend class RenderManagerD3D11OpenGL;
         friend class RenderManagerD3D11ATW;

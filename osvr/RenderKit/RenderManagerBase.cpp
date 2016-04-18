@@ -257,13 +257,23 @@ static void OSVR_from_q(OSVR_PoseState& pose, const q_xyz_quat_type& xform) {
     osvrQuatSetW(&pose.rotation, xform.quat[Q_W]);
 }
 
+namespace {
+    struct OSVR_ClientContext_deleter {
+        inline void operator()(OSVR_ClientContext ctx) const {
+            osvrClientShutdown(ctx);
+        }
+    };
+
+    using ClientContextPtr = std::unique_ptr<OSVR_ClientContextObject, OSVR_ClientContext_deleter>;
+}
+
 namespace osvr {
 namespace renderkit {
 
     RenderManager::RenderManager(
-        OSVR_ClientContext context,
+        OSVR_ClientContext contextIgnored,
         const ConstructorParameters& p)
-        : m_context(context) {
+        : m_context( osvrClientInit("com.osvr.RenderManager") ) {
         // Initialize all of the variables that don't have to be done in the
         // list above, so we don't get warnings about out-of-order
         // initialization if they are re-ordered in the header file.
@@ -428,6 +438,11 @@ namespace renderkit {
             RenderCallbackInfo& cb = m_callbacks.front();
             RemoveRenderCallback(cb.m_interfaceName, cb.m_callback,
                                  cb.m_userData);
+        }
+
+        if (m_context) {
+            osvrClientShutdown(m_context);
+            m_context = nullptr;
         }
     }
 
@@ -2456,7 +2471,8 @@ namespace renderkit {
         // this happens only once, so we'd like to use a shared_ptr() on the
         // basic struct that is the underlying pointer and register the deletion
         // function.
-        OSVR_ClientContext context = osvrClientInit("com.osvr.renderManager");
+        //ClientContextPtr context(osvrClientInit("com.osvr.renderManager"));
+        ClientContextPtr contextLocalOnly(osvrClientInit("com.osvr.renderManager"));
 
         // Wait until we get a connection to a display object, from which we
         // will
@@ -2472,8 +2488,8 @@ namespace renderkit {
         std::chrono::time_point<std::chrono::system_clock> start, end;
         start = std::chrono::system_clock::now();
         do {
-            osvrClientUpdate(context);
-            displayReturnCode = osvrClientGetDisplay(context, &display);
+            osvrClientUpdate(contextLocalOnly.get());
+            displayReturnCode = osvrClientGetDisplay(contextLocalOnly.get(), &display);
             end = std::chrono::system_clock::now();
             std::chrono::duration<double> elapsed = end - start;
             if (elapsed.count() >= 1) {
@@ -2504,7 +2520,7 @@ namespace renderkit {
             // C++ cross-dll boundary issue, and making it
             // a header-only lib might fix it, but we're moving the code here
             // for now.
-            std::string configString = osvrRenderManagerGetString(context,
+            std::string configString = osvrRenderManagerGetString(contextLocalOnly.get(),
               "/renderManagerConfig");
             osvr::client::RenderManagerConfigPtr cfg(
                 new osvr::client::RenderManagerConfig(configString));
@@ -2583,7 +2599,7 @@ namespace renderkit {
         std::string jsonString;
         try {
             std::string jsonString =
-                osvrRenderManagerGetString(context, "/display");
+                osvrRenderManagerGetString(contextLocalOnly.get(), "/display");
             OSVRDisplayConfiguration displayConfig(jsonString);
             p.m_displayConfiguration = displayConfig;
         } catch (std::exception& /*e*/) {
@@ -2782,7 +2798,7 @@ namespace renderkit {
             pTemp.m_distortionParameters.clear();
             {
                 std::unique_ptr<RenderManager> temp(
-                    new RenderManagerNVidiaD3D11(context, pTemp));
+                    new RenderManagerNVidiaD3D11(nullptr, pTemp));
                 temp->OpenDisplay();
             }
 #endif
@@ -2800,20 +2816,20 @@ namespace renderkit {
               if (p.m_asynchronousTimeWarp) {
                 RenderManager::ConstructorParameters pTemp = p;
                 pTemp.m_graphicsLibrary.D3D11 = nullptr;
-                auto wrappedRm = openRenderManagerDirectMode(context, pTemp);
-                ret.reset(new RenderManagerD3D11ATW(context, p, wrappedRm));
+                auto wrappedRm = openRenderManagerDirectMode(nullptr, pTemp);
+                ret.reset(new RenderManagerD3D11ATW(nullptr, p, wrappedRm));
               } else {
                 // Try each available DirectRender library to see if we can
                 // get a pointer to a RenderManager that has access to the
                 // DirectMode display we want to use.
-                ret.reset(openRenderManagerDirectMode(context, p));
+                  ret.reset(openRenderManagerDirectMode(nullptr, p));
               }
               if (ret == nullptr) {
                 std::cerr << "createRenderManager: Could not open the"
                   << " requested DirectMode display" << std::endl;
               }
             } else {
-              ret.reset(new RenderManagerD3D11(context, p));
+                ret.reset(new RenderManagerD3D11(nullptr, p));
             }
 #else
               std::cerr << "createRenderManager: D3D11 render library "

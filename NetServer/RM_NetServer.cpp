@@ -301,7 +301,7 @@ void RenderManagerServer::RunOnce()
                 }
 
                 ++presentCounter; 
-                if ((presentCounter % 60) == 0 || presentCounter == 1)
+                if ((presentCounter % 300) == 0 || presentCounter == 1)
                 {
                     std::cerr << "Presented " << presentCounter << " frames" << std::endl;
                 }                

@@ -219,11 +219,11 @@ std::vector<osvr::renderkit::RenderInfo> OSVR_GetRenderInfo(osvr::renderkit::Ren
         {
             auto const & info = s_pAppState->renderInfo[0];
             //fprintf(stderr, "************************\n");
-            fprintf(stderr, "Head: %2.6f %2.6f %2.6f %2.6f\n",
-                osvrQuatGetX(&info.pose.rotation),
-                osvrQuatGetY(&info.pose.rotation),
-                osvrQuatGetZ(&info.pose.rotation),
-                osvrQuatGetW(&info.pose.rotation));
+            //fprintf(stderr, "Head: %2.6f %2.6f %2.6f %2.6f\n",
+            //    osvrQuatGetX(&info.pose.rotation),
+            //    osvrQuatGetY(&info.pose.rotation),
+            //    osvrQuatGetZ(&info.pose.rotation),
+            //    osvrQuatGetW(&info.pose.rotation));
             //fprintf(stderr, "View: %2.6f %2.6f %2.6f %2.6f\n",
             //    info.viewport.left, info.viewport.lower,
             //    info.viewport.width, info.viewport.height);
